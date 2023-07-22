@@ -6,6 +6,13 @@ keywords: [hubspot api, hubspot verified source, hubspot]
 
 # HubSpot
 
+:::info
+Need help deploying these sources, or figuring out how to run them in your data stack?
+
+[Join our slack community](https://dlthub-community.slack.com/join/shared_invite/zt-1slox199h-HAE7EQoXmstkP_bTqal65g) or [book a call](https://calendar.app.google/kiLhuMsWKpZUpfho6) with our support engineer Adrian.
+:::
+
+
 HubSpot is a customer relationship management (CRM) software and inbound marketing platform that helps businesses to attract visitors, engage customers, and close leads.
 
 The `dlt` HubSpot verified source allows you to automatically load data from HubSpot into a [destination](../destinations/) of your choice. It loads data from the following endpoints:
@@ -48,15 +55,15 @@ Before running the pipeline, you will need to get API credentials. HubSpot no lo
 
 Initialize the pipeline with the following command:
 
-`dlt init hubspot bigquery`
+`dlt init hubspot duckdb`
 
-Here, we chose BigQuery as the destination. Alternatively, you can also choose redshift, duckdb, or any of the other [destinations](../destinations/).
+Here, we chose duckdb as the destination. Alternatively, you can also choose redshift, duckdb, or any of the other [destinations](../destinations/).
 
 ## Add credentials
 
 1. Open `.dlt/secrets.toml`
 2. Enter the token created [above](#get-api-credentials) via app.
-```
+```toml
 # put your secret values and credentials here. do not share this file and do not push it to github
 [sources.hubspot]
 api_key = "api_key" # please set me up!

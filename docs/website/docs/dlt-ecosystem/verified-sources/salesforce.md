@@ -1,5 +1,12 @@
 # Salesforce
 
+:::info
+Need help deploying these sources, or figuring out how to run them in your data stack?
+
+[Join our slack community](https://dlthub-community.slack.com/join/shared_invite/zt-1slox199h-HAE7EQoXmstkP_bTqal65g) or [book a call](https://calendar.app.google/kiLhuMsWKpZUpfho6) with our support engineer Adrian.
+:::
+
+
 Salesforce is a cloud-based platform that helps businesses manage customer relationships and optimize various operational aspects. It empowers you to effectively handle sales, marketing, customer service, and more.
 
 This Salesforce `dlt` verified source and pipeline example offers the capability to load Salesforce endpoints such as "User" and "Opportunity" to a destination of your choosing. It enables you to conveniently load the following endpoints:
@@ -50,11 +57,11 @@ To get started with your verified source, follow these steps:
 1. Open up your terminal or command prompt and navigate to the directory where you'd like to create your project.
 2. Enter the following command:
     ```bash
-    dlt init salesforce bigquery
+    dlt init salesforce duckdb
     ```
 
-    This command will initialize your verified source with Salesforce and creates a pipeline example with BigQuery as the destination.
-    If you'd like to use a different destination, simply replace `bigquery` with the name of your preferred destination.
+    This command will initialize your verified source with Salesforce and creates a pipeline example with duckdb as the destination.
+    If you'd like to use a different destination, simply replace `duckdb` with the name of your preferred destination.
     You can find supported destinations and their configuration options in our [documentation](../destinations/duckdb).
 
 3. After running this command, a new directory will be created with the necessary files and configuration settings to get started.
@@ -74,25 +81,19 @@ To get started with your verified source, follow these steps:
     ```
 
 
-## **Add credential**
+## Add credentials
 
 1. Inside the `.dlt` folder, you'll find a file called “*secrets.toml*”, which is where you can securely store your access tokens and other sensitive information. It's important to handle this file with care and keep it safe.
 
-    Here's what the file looks like:
+Here's what the file looks like:
 
-    ```toml
-    # put your secret values and credentials here. do not share this file and do not push it to github
-    [sources.salesforce]
-    username = "please set me up!" # Salesforce user name
-    password = "please set me up!" # Salesforce password
-    security_token = "please set me up!" # Salesforce security token generated
-
-    [destination.bigquery.credentials]
-    project_id = "project_id" # GCP project ID
-    private_key = "private_key" # Unique private key (including `BEGIN and END PRIVATE KEY`)
-    client_email = "client_email" # Service account email
-    location = "US" # Project location (e.g. “US”)
-    ```
+```toml
+# put your secret values and credentials here. do not share this file and do not push it to github
+[sources.salesforce]
+username = "please set me up!" # Salesforce user name
+password = "please set me up!" # Salesforce password
+security_token = "please set me up!" # Salesforce security token generated
+```
 
 2. Please replace the values of “*username”* and “*password”* in the “*secrets.toml”* with your actual Salesforce account login credentials.
 3. Next, replace the value of “*security_token”* with the one that [you copied above](salesforce.md#grab-credentials). This will ensure that your verified source can access your Salesforce resources securely.
@@ -102,23 +103,23 @@ To get started with your verified source, follow these steps:
 
 1. Install the necessary dependencies by running the following command:
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install -r requirements.txt
+```
 
 2. Now the pipeline can be run by using the command:
 
-    ```bash
-    python3 salesforce_pipeline.py
-    ```
+```bash
+python3 salesforce_pipeline.py
+```
 
 3. To make sure that everything is loaded as expected, use the command:
 
-    ```bash
-    dlt pipeline <pipeline_name> show
-    ```
+```bash
+dlt pipeline <pipeline_name> show
+```
 
-    For example, the pipeline_name for the above pipeline is `salesforce`, you may also use any custom name instead.
+For example, the pipeline_name for the above pipeline is `salesforce`, you may also use any custom name instead.
 
 
 ## Customizations

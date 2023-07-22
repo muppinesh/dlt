@@ -1,7 +1,7 @@
 import itertools
 import os
 import shutil
-from typing import Any
+from typing import Any, Dict
 import pytest
 
 import dlt
@@ -13,17 +13,19 @@ from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.pipeline.pipeline import Pipeline
 from dlt.pipeline.state_sync import STATE_TABLE_COLUMNS, STATE_TABLE_NAME, load_state_from_destination, state_resource
 
-from tests.utils import ALL_DESTINATIONS, patch_home_dir, preserve_environ, autouse_test_storage, TEST_STORAGE_ROOT
+from tests.utils import ALL_DESTINATIONS, TEST_STORAGE_ROOT
+from tests.cases import JSON_TYPED_DICT
 from tests.common.utils import IMPORTED_VERSION_HASH_ETH_V5, yml_case_path as common_yml_case_path
 from tests.common.configuration.utils import environment
-from tests.pipeline.utils import drop_dataset_from_env
-from tests.load.pipeline.utils import assert_query_data, drop_pipeline
-from tests.cases import JSON_TYPED_DICT
+from tests.load.pipeline.utils import assert_query_data, drop_active_pipeline_data
+from tests.load.pipeline.utils import destinations_configs, DestinationTestConfiguration, set_destination_config_envs
 
 
-@pytest.mark.parametrize('destination_name', ALL_DESTINATIONS)
-def test_restore_state_utils(destination_name: str) -> None:
-    p = dlt.pipeline(pipeline_name="pipe_" + uniq_id(), destination=destination_name, dataset_name="state_test_" + uniq_id())
+@pytest.mark.parametrize("destination_config", destinations_configs(default_staging_configs=True, default_non_staging_configs=True), ids=lambda x: x.name)
+def test_restore_state_utils(destination_config: DestinationTestConfiguration) -> None:
+    set_destination_config_envs(destination_config)
+
+    p = dlt.pipeline(pipeline_name="pipe_" + uniq_id(), destination=destination_config.destination, staging=destination_config.staging, dataset_name="state_test_" + uniq_id())
     schema = Schema("state")
     # inject schema into pipeline, don't do it in production
     p._inject_schema(schema)
@@ -49,7 +51,10 @@ def test_restore_state_utils(destination_name: str) -> None:
             **STATE_TABLE_COLUMNS
         })
         schema.update_schema(resource.table_schema())
-        schema.bump_version()
+        # do not bump version here or in sync_schema, dlt won't recognize that schema changed and it won't update it in storage
+        # so dlt in normalize stage infers _state_version table again but with different column order and the column order in schema is different
+        # then in database. parquet is created in schema order and in Redshift it must exactly match the order.
+        # schema.bump_version()
         p.sync_schema()
         exists, _ = job_client.get_storage_table(STATE_TABLE_NAME)
         assert exists is True
@@ -59,7 +64,7 @@ def test_restore_state_utils(destination_name: str) -> None:
         with p.managed_state(extract_state=True):
             pass
         # just run the existing extract
-        p.normalize()
+        p.normalize(loader_file_format=destination_config.file_format)
         p.load()
         stored_state = load_state_from_destination(p.pipeline_name, job_client.sql_client)
         local_state = p._get_state()
@@ -69,7 +74,7 @@ def test_restore_state_utils(destination_name: str) -> None:
         with p.managed_state(extract_state=True) as managed_state:
             # this will be saved
             managed_state["sources"] = {"source": dict(JSON_TYPED_DICT)}
-        p.normalize()
+        p.normalize(loader_file_format=destination_config.file_format)
         p.load()
         stored_state = load_state_from_destination(p.pipeline_name, job_client.sql_client)
         assert stored_state["sources"] == {"source": JSON_TYPED_DICT}
@@ -83,7 +88,7 @@ def test_restore_state_utils(destination_name: str) -> None:
         new_local_state = p._get_state()
         new_local_state.pop("_local")
         assert local_state == new_local_state
-        p.normalize()
+        p.normalize(loader_file_format=destination_config.file_format)
         info = p.load()
         assert len(info.loads_ids) == 0
         new_stored_state = load_state_from_destination(p.pipeline_name, job_client.sql_client)
@@ -112,7 +117,7 @@ def test_restore_state_utils(destination_name: str) -> None:
         assert "_last_extracted_at" in new_local_state_2_local
         # but the version didn't change
         assert new_local_state["_state_version"] == new_local_state_2["_state_version"]
-        p.normalize()
+        p.normalize(loader_file_format=destination_config.file_format)
         info = p.load()
         assert len(info.loads_ids) == 1
         new_stored_state_2 = load_state_from_destination(p.pipeline_name, job_client.sql_client)
@@ -279,7 +284,8 @@ def test_restore_state_pipeline(destination_name: str) -> None:
     p = dlt.pipeline(pipeline_name=pipeline_name, destination=destination_name, dataset_name=dataset_name, full_refresh=True)
     p.run()
     assert p.default_schema_name is None
-    p._wipe_working_folder()
+    drop_active_pipeline_data()
+
     # create pipeline without restore
     os.environ["RESTORE_FROM_DESTINATION"] = "False"
     p = dlt.pipeline(pipeline_name=pipeline_name, destination=destination_name, dataset_name=dataset_name)
@@ -438,11 +444,11 @@ def test_restore_state_parallel_changes(destination_name: str) -> None:
     production_p.run(data3)
     assert production_p.state["_state_version"] > prod_state["_state_version"]
     # and will be detected locally
-    print(p.default_schema)
+    # print(p.default_schema)
     p.sync_destination()
     # existing schema got overwritten
     assert "state1_data2" in p._schema_storage.load_schema(p.default_schema_name).tables
-    print(p.default_schema)
+    # print(p.default_schema)
     assert "state1_data2" in p.default_schema.tables
 
     # change state locally

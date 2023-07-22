@@ -6,6 +6,13 @@ keywords: [strapi api, strapi verified source, strapi]
 
 # Strapi
 
+:::info
+Need help deploying these sources, or figuring out how to run them in your data stack?
+
+[Join our slack community](https://dlthub-community.slack.com/join/shared_invite/zt-1slox199h-HAE7EQoXmstkP_bTqal65g) or [book a call](https://calendar.app.google/kiLhuMsWKpZUpfho6) with our support engineer Adrian.
+:::
+
+
 Strapi is a headless CMS (Content Management System) that allows developers to create powerful API-driven content management systems without having to write a lot of custom code.
 
 Since the endpoints that will be available in Strapi depend on your setup, in order to get data from strapi to your warehouse, you need to be aware of which endpoints you will ingest.
@@ -38,12 +45,6 @@ In the `.dlt` folder, you will find `secrets.toml`, which looks like this:
 [sources.strapi]
 api_secret_key = "api_secret_key" # please set me up!
 domain = "domain" # please set me up!
-
-[destination.bigquery.credentials] # the credentials required will change based on the destination
-project_id = "set me up" # GCP project ID
-private_key = "set me up" # Unique private key (including `BEGINand END PRIVATE KEY`)
-client_email = "set me up" # Service account email
-location = "set me up" # Project location (e.g. “US”)
 ```
 
 1. Replace `api_secret_key` with [the API token you copied above](strapi.md#grab-api-token)

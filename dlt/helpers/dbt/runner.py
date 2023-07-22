@@ -6,8 +6,8 @@ from typing import Sequence
 import dlt
 from dlt.common import logger
 from dlt.common.configuration import with_config, known_sections
-from dlt.common.configuration.specs import CredentialsConfiguration
 from dlt.common.configuration.utils import add_config_to_env
+from dlt.common.destination.reference import DestinationClientDwhConfiguration
 from dlt.common.runners import Venv
 from dlt.common.runners.stdout import iter_stdout_with_result
 from dlt.common.typing import StrAny, TSecretValue
@@ -18,6 +18,8 @@ from dlt.common.utils import with_custom_environ
 
 from dlt.helpers.dbt.configuration import DBTRunnerConfiguration
 from dlt.helpers.dbt.exceptions import IncrementalSchemaOutOfSyncError, PrerequisitesException, DBTNodeResult, DBTProcessingError
+
+from dlt.common.runtime.telemetry import with_telemetry
 
 
 class DBTPackageRunner:
@@ -31,7 +33,7 @@ class DBTPackageRunner:
 
     def __init__(self,
         venv: Venv,
-        credentials: CredentialsConfiguration,
+        credentials: DestinationClientDwhConfiguration,
         working_dir: str,
         source_dataset_name: str,
         config: DBTRunnerConfiguration
@@ -98,9 +100,9 @@ class DBTPackageRunner:
     @with_custom_environ
     def _run_dbt_command(self, command: str, command_args: Sequence[str] = None, package_vars: StrAny = None) -> Sequence[DBTNodeResult]:
         logger.info(f"Exec dbt command: {command} {command_args} {package_vars} on profile {self.config.package_profile_name}")
-        # write credentials to environ to pass them to dbt
+        # write credentials to environ to pass them to dbt, add DLT__ prefix
         if self.credentials:
-            add_config_to_env(self.credentials)
+            add_config_to_env(self.credentials, ("dlt", ))
         args = [
             self.config.runtime.log_level,
             is_json_logging(self.config.runtime.log_format),
@@ -256,12 +258,12 @@ with exec_to_stdout(f):
             raise
 
 
+@with_telemetry("helper", "dbt_create_runner", False, "package_profile_name")
 @with_config(spec=DBTRunnerConfiguration, sections=(known_sections.DBT_PACKAGE_RUNNER,))
 def create_runner(
     venv: Venv,
-    credentials: CredentialsConfiguration,
+    credentials: DestinationClientDwhConfiguration,
     working_dir: str,
-    dataset_name: str,
     package_location: str = dlt.config.value,
     package_repository_branch: str = None,
     package_repository_ssh_key: TSecretValue = TSecretValue(""),  # noqa
@@ -270,4 +272,4 @@ def create_runner(
     auto_full_refresh_when_out_of_sync: bool = None,
     config: DBTRunnerConfiguration = None
     ) -> DBTPackageRunner:
-    return DBTPackageRunner(venv, credentials, working_dir, dataset_name, config)
+    return DBTPackageRunner(venv, credentials, working_dir, credentials.dataset_name, config)

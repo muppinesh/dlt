@@ -5,6 +5,13 @@ keywords: [zendesk api, zendesk pipeline, zendesk]
 ---
 # Zendesk
 
+:::info
+Need help deploying these sources, or figuring out how to run them in your data stack?
+
+[Join our slack community](https://dlthub-community.slack.com/join/shared_invite/zt-1slox199h-HAE7EQoXmstkP_bTqal65g) or [book a call](https://calendar.app.google/kiLhuMsWKpZUpfho6) with our support engineer Adrian.
+:::
+
+
 Zendesk is a cloud-based customer service and support platform. It offers a range of features, including ticket management, self-service options, knowledge base management, live chat, customer analytics, and talks.
 
 Using this guide, you can set up a pipeline that can automatically load data from three possible Zendesk API Clients ([Zendesk support](https://developer.zendesk.com/api-reference/ticketing/introduction/), [Zendesk chat](https://developer.zendesk.com/api-reference/live-chat/introduction/), [Zendesk talk](https://developer.zendesk.com/api-reference/voice/talk-api/introduction/)) onto a [destination](../destinations/) of your choice.
@@ -156,10 +163,10 @@ Credentials for Zendesk talk API
 Initialize the pipeline with the following command:
 
 ```bash
-dlt init zendesk bigquery
+dlt init zendesk duckdb
 ```
 
-Here, we chose BigQuery as the destination. To choose a different destination, replace `bigquery` with your choice of destination.
+Here, we chose duckdb as the destination. To choose a different destination, replace `duckdb` with your choice of destination.
 
 
 ## Add credentials
@@ -186,13 +193,6 @@ subdomain = "subdomian" # Copy subdomain from the url https://[subdomain].zendes
 token = "set me up" # Include this if you wish to authenticate using the API token
 email = "set me up" # Include this if you with to authenticate using subdomain + email address + password
 oauth_token = "set me up" # Include this if you wish to authenticate using OAuth token
-
-#bigquery credentials
-[destination.bigquery.credentials]
-project_id = "set me up" # GCP project ID!
-private_key = "set me up" # Unique private key !(Must be copied fully including BEGIN and END PRIVATE KEY)
-client_email = "set me up" # Email for service account
-location = "set me up" # Project location for ex. “US”
 ```
 
 2. Only add credentials for the APIs from which you wish to request data and remove the rest.
@@ -211,7 +211,7 @@ def incremental_load_all_default():
     Loads all possible tables for Zendesk Support, Chat, Talk
     """
     # FULL PIPELINE RUN
-    pipeline = dlt.pipeline(pipeline_name="dlt_zendesk_pipeline", destination="bigquery", full_refresh=True, dataset_name="sample_zendesk_data3")
+    pipeline = dlt.pipeline(pipeline_name="dlt_zendesk_pipeline", destination="duckdb", full_refresh=True, dataset_name="sample_zendesk_data3")
 
     # zendesk support source function
     data_support = zendesk_support(load_all=True)
@@ -254,7 +254,7 @@ data_support = zendesk_support(pivot_ticket_fields=False)
     """
     Loads Zendesk Support data with pivoting. Simply done by setting the pivot_ticket_fields to true - default option. Loads only the base tables.
     """
-    pipeline = dlt.pipeline(pipeline_name="zendesk_support_pivoting", destination='bigquery', full_refresh=False)
+    pipeline = dlt.pipeline(pipeline_name="zendesk_support_pivoting", destination='duckdb', full_refresh=False)
     data = zendesk_support(load_all=False, pivot_ticket_fields=True)
     info = pipeline.run(data=data)
     return info
@@ -267,5 +267,5 @@ data_support = zendesk_support(pivot_ticket_fields=False)
 
 2. **Custom field rename**: The pipeline loads the custom fields with their label names. If the label changes between loads, the initial label continues to be used (is persisted in state). To reset the labels, do a full refresh. This can be achieved by passing `full_refresh=True` when calling `dlt.pipeline`:
 ```python
-pipeline = dlt.pipeline(pipeline_name="dlt_zendesk_pipeline", destination='bigquery', full_refresh=True, dataset_name="sample_zendesk_data3")
+pipeline = dlt.pipeline(pipeline_name="dlt_zendesk_pipeline", destination='duckdb', full_refresh=True, dataset_name="sample_zendesk_data3")
 ```

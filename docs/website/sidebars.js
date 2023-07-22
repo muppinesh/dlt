@@ -28,6 +28,7 @@ const sidebars = {
       items: [
         'getting-started/try-in-colab',
         'getting-started/build-a-data-pipeline',
+        'getting-started/use-an-existing-source',
         {
           type: 'category',
           label: 'Build a data platform',
@@ -45,7 +46,7 @@ const sidebars = {
       link: {
         type: 'generated-index',
         title: 'dlt Ecosystem',
-        description: 'An overview of different aspects of the dlt ecosystem',
+        description: 'dlt fits everywhere where the data flows. check out our curated data sources, destinations and unexpected places where dlt runs',
         slug: 'dlt-ecosystem',
         keywords: ['getting started'],
       },
@@ -54,11 +55,8 @@ const sidebars = {
           type: 'category',
           label: 'Verified Sources',
           link: {
-            type: 'generated-index',
-            title: 'Verified Sources',
-            description: 'Overview over our verified sources. A source is a location that holds data with certain structure. Organized into one or more resources. We have verified reference implementations for the sources listed below.',
-            slug: 'dlt-ecosystem/verified-sources',
-            keywords: ['verified source'],
+            type: 'doc',
+            id: 'dlt-ecosystem/verified-sources/index',
           },
           items: [
             'dlt-ecosystem/verified-sources/asana',
@@ -79,7 +77,7 @@ const sidebars = {
             'dlt-ecosystem/verified-sources/strapi',
             'dlt-ecosystem/verified-sources/stripe',
             'dlt-ecosystem/verified-sources/workable',
-            'dlt-ecosystem/verified-sources/zendesk',
+            'dlt-ecosystem/verified-sources/zendesk'
           ]
         },
         {
@@ -102,11 +100,8 @@ const sidebars = {
           type: 'category',
           label: 'Destinations',
           link: {
-            type: 'generated-index',
-            title: 'Destinations',
-            description: 'Overview of our destinations. A destination is the data store where data from the source is loaded. Learn how to use them in your pipelines.',
-            slug: 'dlt-ecosystem/destinations',
-            keywords: ['destination'],
+            type: 'doc',
+            id: 'dlt-ecosystem/destinations/index',
           },
           items: [
             'dlt-ecosystem/destinations/bigquery',
@@ -118,6 +113,7 @@ const sidebars = {
             'dlt-ecosystem/destinations/motherduck',
           ]
         },
+        'dlt-ecosystem/staging',
         {
           type: 'category',
           label: 'Deployments',
@@ -239,6 +235,7 @@ const sidebars = {
         'general-usage/pipeline',
         'general-usage/state',
         'general-usage/incremental-loading',
+        'general-usage/full-loading',
         'general-usage/credentials',
         'general-usage/schema',
         'general-usage/configuration',

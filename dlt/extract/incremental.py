@@ -8,7 +8,7 @@ from dlt.common.json import json
 from dlt.common.jsonpath import compile_path, find_values, JSONPath
 from dlt.common.typing import TDataItem, TDataItems, TFun, extract_inner_type, is_optional_type
 from dlt.common.schema.typing import TColumnKey
-from dlt.common.configuration import configspec
+from dlt.common.configuration import configspec, ConfigurationValueError
 from dlt.common.configuration.specs import BaseConfiguration
 from dlt.common.pipeline import resource_state
 from dlt.common.utils import digest128
@@ -75,16 +75,22 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         initial_value: Optional value used for `last_value` when no state is available, e.g. on the first run of the pipeline. If not provided `last_value` will be `None` on the first run.
         last_value_func: Callable used to determine which cursor value to save in state. It is called with a list of the stored state value and all cursor vals from currently processing items. Default is `max`
         primary_key: Optional primary key used to deduplicate data. If not provided, a primary key defined by the resource will be used. Pass a tuple to define a compound key. Pass empty tuple to disable unique checks
+        end_value: Optional value used to load a limited range of records between `initial_value` and `end_value`.
+            Use in conjunction with `initial_value`, e.g. load records from given month `incremental(initial_value="2022-01-01T00:00:00Z", end_value="2022-02-01T00:00:00Z")`
+            Note, when this is set the incremental filtering is stateless and `initial_value` always supersedes any previous incremental value in state.
     """
     cursor_path: str = None
+    # TODO: Support typevar here
     initial_value: Optional[Any] = None
+    end_value: Optional[Any] = None
 
     def __init__(
             self,
             cursor_path: str = dlt.config.value,
             initial_value: Optional[TCursorValue]=None,
             last_value_func: Optional[LastValueFunc[TCursorValue]]=max,
-            primary_key: Optional[TTableHintTemplate[TColumnKey]] = None
+            primary_key: Optional[TTableHintTemplate[TColumnKey]] = None,
+            end_value: Optional[TCursorValue] = None
     ) -> None:
         self.cursor_path = cursor_path
         if self.cursor_path:
@@ -92,6 +98,7 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         self.last_value_func = last_value_func
         self.initial_value = initial_value
         """Initial value of last_value"""
+        self.end_value = end_value
         self.start_value: Any = initial_value
         """Value of last_value at the beginning of current pipeline run"""
         self.resource_name: Optional[str] = None
@@ -99,6 +106,11 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         self._cached_state: IncrementalColumnState = None
         """State dictionary cached on first access"""
         super().__init__(self.transform)
+
+        self.end_out_of_range: bool = False
+        """Becomes true on the first item that is out of range of `end_value`. I.e. when using `max` function this means a value that is equal or higher"""
+        self.start_out_of_range: bool = False
+        """Becomes true on the first item that is out of range of `initial_value`. I.e. when using `max` this is a value that is lower than `initial_value`"""
 
     @classmethod
     def from_existing_state(cls, resource_name: str, cursor_path: str) -> "Incremental[TCursorValue]":
@@ -109,16 +121,50 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         return i
 
     def copy(self) -> "Incremental[TCursorValue]":
-        return self.__class__(self.cursor_path, initial_value=self.initial_value, last_value_func=self.last_value_func, primary_key=self.primary_key)
+        return self.__class__(
+            self.cursor_path, initial_value=self.initial_value, last_value_func=self.last_value_func, primary_key=self.primary_key, end_value=self.end_value
+        )
+
+    def merge(self, other: "Incremental[TCursorValue]") -> "Incremental[TCursorValue]":
+        """Create a new incremental instance which merges the two instances.
+        Only properties which are not `None` from `other` override the current instance properties.
+
+        This supports use cases with partial overrides, such as:
+        >>> def my_resource(updated=incremental('updated', initial_value='1970-01-01'))
+        >>>     ...
+        >>>
+        >>> my_resource(updated=incremental(initial_value='2023-01-01', end_value='2023-02-01'))
+        """
+        kwargs = dict(self, last_value_func=self.last_value_func, primary_key=self.primary_key)
+        for key, value in dict(other, last_value_func=other.last_value_func, primary_key=other.primary_key).items():
+            if value is not None:
+                kwargs[key] = value
+        return self.__class__(**kwargs)
 
     def on_resolved(self) -> None:
         self.cursor_path_p = compile_path(self.cursor_path)
+        if self.end_value is not None and self.initial_value is None:
+            raise ConfigurationValueError(
+                "Incremental 'end_value' was specified without 'initial_value'. 'initial_value' is required when using 'end_value'."
+            )
+        # Ensure end value is "higher" than initial value
+        if self.end_value is not None and self.last_value_func([self.end_value, self.initial_value]) != self.end_value:
+            if self.last_value_func in (min, max):
+                adject = 'higher' if self.last_value_func is max else 'lower'
+                msg = f"Incremental 'initial_value' ({self.initial_value}) is {adject} than 'end_value` ({self.end_value}). 'end_value' must be {adject} than 'initial_value'"
+            else:
+                msg = (
+                    f"Incremental 'initial_value' ({self.initial_value}) is greater than 'end_value' ({self.end_value}) as determined by the custom 'last_value_func'. "
+                    f"The result of '{self.last_value_func.__name__}([end_value, initial_value])' must equal 'end_value'"
+                )
+            raise ConfigurationValueError(msg)
 
     def parse_native_representation(self, native_value: Any) -> None:
         if isinstance(native_value, Incremental):
             self.cursor_path = native_value.cursor_path
             self.initial_value = native_value.initial_value
             self.last_value_func = native_value.last_value_func
+            self.end_value = native_value.end_value
             self.cursor_path_p = self.cursor_path_p
             self.resource_name = self.resource_name
         else:  # TODO: Maybe check if callable(getattr(native_value, '__lt__', None))
@@ -131,6 +177,15 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         """Returns an Incremental state for a particular cursor column"""
         if not self.resource_name:
             raise IncrementalUnboundError(self.cursor_path)
+
+        if self.end_value is not None:
+            # End value uses mock state. We don't want to write it.
+            return {
+                'initial_value': self.initial_value,
+                'last_value': self.initial_value,
+                'unique_hashes': []
+            }
+
         self._cached_state = Incremental._get_state(self.resource_name, self.cursor_path)
         if len(self._cached_state) == 0:
             # set the default like this, setdefault evaluates the default no matter if it is needed or not. and our default is heavy
@@ -172,9 +227,6 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         row_values = find_values(self.cursor_path_p, row)
         if not row_values:
             raise IncrementalCursorPathMissing(self.resource_name, self.cursor_path, row)
-
-        incremental_state = self._cached_state
-        last_value = incremental_state['last_value']
         row_value = row_values[0]
 
         # For datetime cursor, ensure the value is a timezone aware datetime.
@@ -182,11 +234,24 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
         if isinstance(row_value, datetime):
             row_value = pendulum.instance(row_value)
 
+        incremental_state = self._cached_state
+        last_value = incremental_state['last_value']
+        last_value_func = self.last_value_func
+
+        # Check whether end_value has been reached
+        # Filter end value ranges exclusively, so in case of "max" function we remove values >= end_value
+        if self.end_value is not None and (
+            last_value_func((row_value, self.end_value)) != self.end_value or last_value_func((row_value, )) == self.end_value
+        ):
+            self.end_out_of_range = True
+            return False
+
         check_values = (row_value,) + ((last_value, ) if last_value is not None else ())
-        new_value = self.last_value_func(check_values)
+        new_value = last_value_func(check_values)
         if last_value == new_value:
+            processed_row_value = last_value_func((row_value, ))
             # we store row id for all records with the current "last_value" in state and use it to deduplicate
-            if self.last_value_func((row_value, )) == last_value:
+            if processed_row_value == last_value:
                 unique_value = self.unique_value(row)
                 # if unique value exists then use it to deduplicate
                 if unique_value:
@@ -197,16 +262,19 @@ class Incremental(FilterItem, BaseConfiguration, Generic[TCursorValue]):
                 return True
             # skip the record that is not a last_value or new_value: that record was already processed
             check_values = (row_value,) + ((self.start_value,) if self.start_value is not None else ())
-            new_value = self.last_value_func(check_values)
-            if new_value == self.start_value:
+            new_value = last_value_func(check_values)
+            # Include rows == start_value but exclude "lower"
+            if new_value == self.start_value and processed_row_value != self.start_value:
+                self.start_out_of_range = True
                 return False
             else:
                 return True
-        if new_value != last_value:
+        else:
             incremental_state["last_value"] = new_value
             unique_value = self.unique_value(row)
             if unique_value:
                 incremental_state["unique_hashes"] = [unique_value]
+
         return True
 
     def bind(self, pipe: SupportsPipe) -> "Incremental[TCursorValue]":
@@ -265,14 +333,19 @@ class IncrementalResourceWrapper(FilterItem):
             if p.name in bound_args.arguments:
                 explicit_value = bound_args.arguments[p.name]
                 if isinstance(explicit_value, Incremental):
-                    # Explicit Incremental instance is untouched
-                    new_incremental = explicit_value.copy()
+                    # Explicit Incremental instance is merged with default
+                    # allowing e.g. to only update initial_value/end_value but keeping default cursor_path
+                    if isinstance(p.default, Incremental):
+                        new_incremental = p.default.merge(explicit_value)
+                    else:
+                        new_incremental = explicit_value.copy()
                 elif isinstance(p.default, Incremental):
                     # Passing only initial value explicitly updates the default instance
                     new_incremental = p.default.copy()
                     new_incremental.initial_value = explicit_value
             elif isinstance(p.default, Incremental):
                 new_incremental = p.default.copy()
+
 
             if not new_incremental or new_incremental.is_partial():
                 if is_optional_type(p.annotation):
@@ -283,6 +356,7 @@ class IncrementalResourceWrapper(FilterItem):
             # NOTE: the _incremental may be also set by applying hints to the resource see `set_template` in `DltResource`
             if p.name in bound_args.arguments or not self._incremental:
                 self._incremental = new_incremental
+            self._incremental.resolve()
             # in case of transformers the bind will be called before this wrapper is set: because transformer is called for a first time late in the pipe
             self._incremental.bind(Pipe(self.resource_name))
             bound_args.arguments[p.name] = self._incremental

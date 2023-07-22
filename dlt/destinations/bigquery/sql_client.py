@@ -1,6 +1,6 @@
 
 from contextlib import contextmanager
-from typing import Any, AnyStr, ClassVar, Iterator, List, Optional, Sequence
+from typing import Any, AnyStr, ClassVar, Iterator, List, Optional, Sequence, Type
 
 import google.cloud.bigquery as bigquery  # noqa: I250
 from google.cloud.bigquery import dbapi as bq_dbapi
@@ -47,21 +47,31 @@ class BigQuerySqlClient(SqlClientBase[bigquery.Client], DBTransaction):
     dbapi: ClassVar[DBApi] = bq_dbapi
     capabilities: ClassVar[DestinationCapabilitiesContext] = capabilities()
 
-    def __init__(self, dataset_name: str, credentials: GcpServiceAccountCredentialsWithoutDefaults) -> None:
+    def __init__(
+        self,
+        dataset_name: str,
+        credentials: GcpServiceAccountCredentialsWithoutDefaults,
+        location: str = "US",
+        http_timeout: float = 15.0,
+        retry_deadline: float = 60.0
+    ) -> None:
         self._client: bigquery.Client = None
         self.credentials: GcpServiceAccountCredentialsWithoutDefaults = credentials
+        self.location = location
+        self.http_timeout = http_timeout
         super().__init__(credentials.project_id, dataset_name)
 
-        self._default_retry = bigquery.DEFAULT_RETRY.with_deadline(credentials.retry_deadline)
+        self._default_retry = bigquery.DEFAULT_RETRY.with_deadline(retry_deadline)
         self._default_query = bigquery.QueryJobConfig(default_dataset=self.fully_qualified_dataset_name(escape=False))
         self._session_query: bigquery.QueryJobConfig = None
+
 
     @raise_open_connection_error
     def open_connection(self) -> bigquery.Client:
         self._client = bigquery.Client(
             self.credentials.project_id,
             credentials=self.credentials.to_native_credentials(),
-            location=self.credentials.location
+            location=self.location
         )
 
         # patch the client query so our defaults are used
@@ -70,7 +80,7 @@ class BigQuerySqlClient(SqlClientBase[bigquery.Client], DBTransaction):
         def query_patch(
             query: str,
             retry: Any = self._default_retry,
-            timeout: Any = self.credentials.http_timeout,
+            timeout: Any = self.http_timeout,
             **kwargs: Any
         ) -> Any:
             return query_orig(query, retry=retry, timeout=timeout, **kwargs)
@@ -140,7 +150,7 @@ class BigQuerySqlClient(SqlClientBase[bigquery.Client], DBTransaction):
 
     def has_dataset(self) -> bool:
         try:
-            self._client.get_dataset(self.fully_qualified_dataset_name(escape=False), retry=self._default_retry, timeout=self.credentials.http_timeout)
+            self._client.get_dataset(self.fully_qualified_dataset_name(escape=False), retry=self._default_retry, timeout=self.http_timeout)
             return True
         except gcp_exceptions.NotFound:
             return False
@@ -150,7 +160,7 @@ class BigQuerySqlClient(SqlClientBase[bigquery.Client], DBTransaction):
             self.fully_qualified_dataset_name(escape=False),
             exists_ok=False,
             retry=self._default_retry,
-            timeout=self.credentials.http_timeout
+            timeout=self.http_timeout
         )
 
     def drop_dataset(self) -> None:
@@ -159,7 +169,7 @@ class BigQuerySqlClient(SqlClientBase[bigquery.Client], DBTransaction):
             not_found_ok=True,
             delete_contents=True,
             retry=self._default_retry,
-            timeout=self.credentials.http_timeout
+            timeout=self.http_timeout
         )
 
     def execute_sql(self, sql: AnyStr, *args: Any, **kwargs: Any) -> Optional[Sequence[Sequence[Any]]]:

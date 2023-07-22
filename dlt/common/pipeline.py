@@ -1,7 +1,6 @@
 import os
 import datetime  # noqa: 251
 import humanize
-import inspect
 import contextlib
 from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Protocol, Sequence, TYPE_CHECKING, Tuple, TypedDict
 
@@ -25,8 +24,16 @@ from dlt.common.jsonpath import delete_matches, TAnyJsonPath
 from dlt.common.data_writers.writers import TLoaderFileFormat
 
 
+class ExtractDataInfo(TypedDict):
+    name: str
+    data_type: str
+
+
 class ExtractInfo(NamedTuple):
     """A tuple holding information on extracted data items. Returned by pipeline `extract` method."""
+
+    extract_data_info: List[ExtractDataInfo]
+
     def asdict(self) -> DictStrAny:
         return {}
 
@@ -54,6 +61,8 @@ class LoadInfo(NamedTuple):
     pipeline: "SupportsPipeline"
     destination_name: str
     destination_displayable_credentials: str
+    staging_name: str
+    staging_displayable_credentials: str
     dataset_name: str
     loads_ids: List[str]
     """ids of the loaded packages"""
@@ -79,6 +88,9 @@ class LoadInfo(NamedTuple):
         else:
             msg += "---"
         msg += f"\n{len(self.loads_ids)} load package(s) were loaded to destination {self.destination_name} and into dataset {self.dataset_name}\n"
+        if self.staging_name:
+            msg += f"The {self.staging_name} staging destination used {self.staging_displayable_credentials} location to stage data\n"
+
         msg += f"The {self.destination_name} destination used {self.destination_displayable_credentials} location to store data"
         for load_package in self.load_packages:
             cstr = load_package.state.upper() if load_package.completed_at else "NOT COMPLETED"
@@ -106,8 +118,9 @@ class LoadInfo(NamedTuple):
     def raise_on_failed_jobs(self) -> None:
         """Raises `DestinationHasFailedJobs` exception if any of the load packages has a failed job."""
         for load_package in self.load_packages:
-            if len(load_package.jobs["failed_jobs"]):
-                raise DestinationHasFailedJobs(self.destination_name, load_package.load_id)
+            failed_jobs = load_package.jobs["failed_jobs"]
+            if len(failed_jobs):
+                raise DestinationHasFailedJobs(self.destination_name, load_package.load_id, failed_jobs)
 
     def __str__(self) -> str:
         return self.asstr(verbosity=1)
@@ -128,6 +141,7 @@ class TPipelineState(TypedDict, total=False):
     schema_names: Optional[List[str]]
     """All the schemas present within the pipeline working directory"""
     destination: Optional[str]
+    staging: Optional[str]
 
     # properties starting with _ are not automatically applied to pipeline object when state is restored
     _state_version: int
@@ -202,7 +216,8 @@ class SupportsPipelineRun(Protocol):
         table_name: str = None,
         write_disposition: TWriteDisposition = None,
         columns: Sequence[TColumnSchema] = None,
-        schema: Schema = None
+        schema: Schema = None,
+        loader_file_format: TLoaderFileFormat = None
     ) -> LoadInfo:
         ...
 

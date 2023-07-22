@@ -6,6 +6,13 @@ keywords: [github api, github verified source, github]
 
 # GitHub
 
+:::info
+Need help deploying these sources, or figuring out how to run them in your data stack?
+
+[Join our slack community](https://dlthub-community.slack.com/join/shared_invite/zt-1slox199h-HAE7EQoXmstkP_bTqal65g) or [book a call](https://calendar.app.google/kiLhuMsWKpZUpfho6) with our support engineer Adrian.
+:::
+
+
 This verified source can be used to load data on issues or pull requests from any GitHub repository onto a [destination](../../dlt-ecosystem/destinations) of your choice.
 
 It accesses the GitHub API from two `dlt` sources:
@@ -41,26 +48,20 @@ You can learn more about GitHub authentication in the docs [here](https://docs.g
 
 Initialize the pipeline with the following command:
 ```
-dlt init github bigquery
+dlt init github duckdb
 ```
-Here, we chose BigQuery as the destination. To choose a different destination, replace `bigquery` with your choice of destination.
+Here, we chose duckdb as the destination. To choose a different destination, replace `duckdb` with your choice of destination.
 
 ## Add credentials
 
 1. In the `.dlt` folder, you will find `secrets.toml`, which looks like this:
 
-```bash
+```toml
 # Put your secret values and credentials here
 # Note: Do not share this file and do not push it to GitHub!
 # Github access token (must be classic for reactions source)
 [sources.github]
 access_token="GITHUB_API_TOKEN"
-
-[destination.bigquery.credentials] # the credentials required will change based on the destination
-project_id = "set me up" # GCP project ID
-private_key = "set me up" # Unique private key (including `BEGINand END PRIVATE KEY`)
-client_email = "set me up" # Service account email
-location = "set me up" # Project location (e.g. “US”)
 ```
 
 2. Replace `"GITHUB_API_TOKEN"` with the API token you [copied above](#grab-the-api-auth-token) or leave it blank if not specified.
