@@ -2,11 +2,11 @@ import posixpath
 from typing import Sequence, Tuple, List
 
 import pytest
-from dlt.common.schema.schema import Schema
-
+from dlt.common.utils import digest128
 from dlt.common.storages import LoadStorage, FileStorage
 from dlt.common.destination.reference import LoadJob
-from dlt.destinations.filesystem.filesystem import FilesystemClient, LoadFilesystemJob
+
+from dlt.destinations.filesystem.filesystem import FilesystemClient, LoadFilesystemJob, FilesystemClientConfiguration
 from dlt.load import Load
 from dlt.destinations.job_impl import EmptyLoadJob
 
@@ -29,6 +29,12 @@ NORMALIZED_FILES = [
     "event_user.839c6e6b514e427687586ccc65bf133f.0.jsonl",
     "event_loop_interrupted.839c6e6b514e427687586ccc65bf133f.0.jsonl"
 ]
+
+
+def test_filesystem_configuration() -> None:
+    assert FilesystemClientConfiguration().fingerprint() == ""
+    assert FilesystemClientConfiguration(bucket_url="s3://cool").fingerprint() == digest128("s3://cool")
+
 
 @pytest.mark.parametrize('write_disposition', ('replace', 'append', 'merge'))
 def test_successful_load(write_disposition: str, all_buckets_env: str, filesystem_client: FilesystemClient) -> None:
@@ -104,7 +110,15 @@ def perform_load(
     load_id, schema = prepare_load_package(load.load_storage, cases, write_disposition)
 
     client.schema = schema
-    client.initialize_storage()
+
+    # for the replace disposition in the loader we truncate the tables, so do this here
+    truncate_tables = []
+    if write_disposition == 'replace':
+        for item in cases:
+            parts = item.split('.')
+            truncate_tables.append(parts[0])
+
+    client.initialize_storage(truncate_tables=truncate_tables)
     root_path = posixpath.join(client.fs_path, client.config.dataset_name)
 
     files = load.load_storage.list_new_jobs(load_id)

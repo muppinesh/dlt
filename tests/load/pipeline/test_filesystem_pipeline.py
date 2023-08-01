@@ -9,9 +9,6 @@ from dlt.common.schema.typing import LOADS_TABLE_NAME
 
 import pyarrow.parquet as pq
 
-from tests.utils import init_test_logging
-
-
 
 def assert_file_matches(job: LoadJobInfo, load_id: str, client: FilesystemClient) -> None:
     """Verify file contents of load job are identical to the corresponding file in destination"""
@@ -61,9 +58,10 @@ def test_pipeline_merge_write_disposition(all_buckets_env: str) -> None:
     assert any(load_id1 in fn for fn in append_files)
     assert any(load_id2 in fn for fn in append_files)
 
-    # resource without pk is replaced and has 1 copy from second load
-    assert len(replace_files) == 1
-    assert load_id2 in replace_files[0]
+    # resource without pk is treated as append disposition
+    assert len(replace_files) == 2
+    assert any(load_id1 in fn for fn in replace_files)
+    assert any(load_id2 in fn for fn in replace_files)
 
     # Verify file contents
     assert info2.load_packages
@@ -85,7 +83,6 @@ def test_pipeline_merge_write_disposition(all_buckets_env: str) -> None:
     replace_files = client.fs_client.glob(replace_glob)
     assert len(append_files) == 1
     assert len(replace_files) == 1
-
 
 
 def test_pipeline_parquet_filesystem_destination() -> None:

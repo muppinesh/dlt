@@ -234,8 +234,11 @@ def test_evolve_schema(destination_name: str) -> None:
     info = p.load(dataset_name=dataset_name)
     # test __str__
     print(info)
+    # test fingerprint in load
+    assert info.destination_fingerprint == p._destination_client().config.fingerprint()
     # print(p.default_schema.to_pretty_yaml())
     schema = p.default_schema
+    version_history = [schema.stored_version_hash]
     assert "simple_rows" in schema.tables
     assert "simple" not in schema.tables
     assert "new_column" not in schema.get_table("simple_rows")["columns"]
@@ -244,6 +247,7 @@ def test_evolve_schema(destination_name: str) -> None:
     if destination_name == "postgres":
         assert p.dataset_name == dataset_name
         err_info = p.run(source(1).with_resources("simple_rows"))
+        version_history.append(p.default_schema.stored_version_hash)
         # print(err_info)
         # we have failed jobs
         assert len(err_info.load_packages[0].jobs["failed_jobs"]) == 1
@@ -255,6 +259,7 @@ def test_evolve_schema(destination_name: str) -> None:
     print(info_ext)
     # print(p.default_schema.to_pretty_yaml())
     schema = p.default_schema
+    version_history.append(schema.stored_version_hash)
     assert "simple_rows" in schema.tables
     assert "simple" in schema.tables
     assert "new_column" in schema.get_table("simple_rows")["columns"]
@@ -264,6 +269,7 @@ def test_evolve_schema(destination_name: str) -> None:
     # test data
     id_data = sorted(["level" + str(n) for n in range(10)] + ["level" + str(n) for n in range(100, 110)])
     assert_query_data(p, "SELECT * FROM simple_rows ORDER BY id", id_data)
+    assert_query_data(p, "SELECT schema_version_hash FROM _dlt_loads ORDER BY inserted_at", version_history)
 
 
 @pytest.mark.parametrize('disable_compression', [True, False])
@@ -433,15 +439,13 @@ def test_pipeline_with_sources_sharing_schema(destination_name: str) -> None:
 
     p = dlt.pipeline(pipeline_name="multi", destination="duckdb", full_refresh=True)
     p.extract([source_1(), source_2()])
-    # tables without columns are not added after extract
     default_schema = p.default_schema
     gen1_table = default_schema.tables["gen1"]
     assert "user_id" in gen1_table["columns"]
     assert "id" in gen1_table["columns"]
     assert "conflict" in default_schema.tables
-    assert "gen2" not in default_schema.tables
+    assert "gen2" in default_schema.tables
     p.normalize()
-    # default schema is a live object and must contain gen2 now
     assert "gen2" in default_schema.tables
     p.load()
     table_names = [t["name"] for t in default_schema.data_tables()]

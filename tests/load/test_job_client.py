@@ -168,6 +168,11 @@ def test_complete_load(client: SqlJobClientBase) -> None:
     assert load_rows[0][2] == 0
     import datetime  # noqa: I251
     assert type(load_rows[0][3]) is datetime.datetime
+    assert load_rows[0][4] == client.schema.version_hash
+    # make sure that hash in loads exists in schema versions table
+    versions_table = client.sql_client.make_qualified_table_name(VERSION_TABLE_NAME)
+    version_rows = list(client.sql_client.execute_sql(f"SELECT * FROM {versions_table} WHERE version_hash = %s", load_rows[0][4]))
+    assert len(version_rows) == 1
     client.complete_load("load2")
     load_rows = list(client.sql_client.execute_sql(f"SELECT * FROM {load_table}"))
     assert len(load_rows) == 2
@@ -270,6 +275,7 @@ def test_drop_tables(client: SqlJobClientBase) -> None:
     # Add columns in all tables
     schema.tables['event_user']['columns'] = dict(schema.tables['event_slot']['columns'])
     schema.tables['event_bot']['columns'] = dict(schema.tables['event_slot']['columns'])
+    schema.bump_version()
     client.update_storage_schema()
 
     # Create a second schema with 2 hashes
@@ -430,7 +436,14 @@ def test_load_with_all_types(client: SqlJobClientBase, write_disposition: str, f
     client.schema.update_schema(new_table(table_name, write_disposition=write_disposition, columns=TABLE_UPDATE))
     client.schema.bump_version()
     client.update_storage_schema()
-    canonical_name = client.sql_client.make_qualified_table_name(table_name)
+
+    if write_disposition in client.get_stage_dispositions():
+        # create staging for merge dataset
+        client.initialize_storage(staging=True)
+        client.update_storage_schema(staging=True)
+
+    with client.sql_client.with_staging_dataset(write_disposition in client.get_stage_dispositions()):
+        canonical_name = client.sql_client.make_qualified_table_name(table_name)
     # write row
     with io.BytesIO() as f:
         write_dataset(client, f, [TABLE_ROW_ALL_DATA_TYPES], TABLE_UPDATE_COLUMNS_SCHEMA)
@@ -462,22 +475,35 @@ def test_write_dispositions(client: SqlJobClientBase, write_disposition: str, re
         )
     client.schema.bump_version()
     client.update_storage_schema()
+
     if write_disposition == "merge":
         # add root key
         client.schema.tables[table_name]["columns"]["col1"]["root_key"] = True
         # create staging for merge dataset
         with client.with_staging_dataset():
             client.initialize_storage()
+            client.schema.bump_version()
             client.update_storage_schema()
     for idx in range(2):
+        # in the replace strategies, tables get truncated between loads
+        truncate_tables = [table_name, child_table]
+        if write_disposition == "replace":
+            client.initialize_storage(truncate_tables=truncate_tables)
+
         for t in [table_name, child_table]:
             # write row, use col1 (INT) as row number
-            table_row = deepcopy(TABLE_ROW_ALL_DATA_TYPES )
+            table_row = deepcopy(TABLE_ROW_ALL_DATA_TYPES)
             table_row["col1"] = idx
             with io.BytesIO() as f:
                 write_dataset(client, f, [table_row], TABLE_UPDATE_COLUMNS_SCHEMA)
                 query = f.getvalue().decode()
-            expect_load_file(client, file_storage, query, t)
+            if write_disposition in client.get_stage_dispositions():
+                # load to staging dataset on merge
+                with client.with_staging_dataset():
+                    expect_load_file(client, file_storage, query, t)
+            else:
+                # load directly on other
+                expect_load_file(client, file_storage, query, t)
             db_rows = list(client.sql_client.execute_sql(f"SELECT * FROM {client.sql_client.make_qualified_table_name(t)} ORDER BY col1 ASC"))
             # in case of merge
             if write_disposition == "append":

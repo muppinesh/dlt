@@ -8,24 +8,31 @@ import dlt
 from dlt.common import pendulum
 from dlt.common.schema.schema import Schema, utils
 from dlt.common.schema.typing import LOADS_TABLE_NAME, VERSION_TABLE_NAME
-from dlt.common.utils import uniq_id
+from dlt.common.utils import custom_environ, uniq_id
 from dlt.destinations.exceptions import DatabaseUndefinedRelation
 from dlt.pipeline.pipeline import Pipeline
 from dlt.pipeline.state_sync import STATE_TABLE_COLUMNS, STATE_TABLE_NAME, load_state_from_destination, state_resource
 
 from tests.utils import ALL_DESTINATIONS, TEST_STORAGE_ROOT
 from tests.cases import JSON_TYPED_DICT
-from tests.common.utils import IMPORTED_VERSION_HASH_ETH_V5, yml_case_path as common_yml_case_path
+from tests.common.utils import IMPORTED_VERSION_HASH_ETH_V6, yml_case_path as common_yml_case_path
 from tests.common.configuration.utils import environment
 from tests.load.pipeline.utils import assert_query_data, drop_active_pipeline_data
-from tests.load.pipeline.utils import destinations_configs, DestinationTestConfiguration, set_destination_config_envs
+from tests.load.pipeline.utils import destinations_configs, DestinationTestConfiguration
+
+
+@pytest.fixture(autouse=True)
+def duckdb_pipeline_location() -> None:
+    # this will store duckdb in working folder so it survives pipeline wipe
+    if "DESTINATION__DUCKDB__CREDENTIALS" in os.environ:
+        del os.environ["DESTINATION__DUCKDB__CREDENTIALS"]
 
 
 @pytest.mark.parametrize("destination_config", destinations_configs(default_staging_configs=True, default_non_staging_configs=True), ids=lambda x: x.name)
 def test_restore_state_utils(destination_config: DestinationTestConfiguration) -> None:
-    set_destination_config_envs(destination_config)
 
-    p = dlt.pipeline(pipeline_name="pipe_" + uniq_id(), destination=destination_config.destination, staging=destination_config.staging, dataset_name="state_test_" + uniq_id())
+    p = destination_config.setup_pipeline(pipeline_name="pipe_" + uniq_id(), dataset_name="state_test_" + uniq_id())
+
     schema = Schema("state")
     # inject schema into pipeline, don't do it in production
     p._inject_schema(schema)
@@ -382,7 +389,7 @@ def test_restore_schemas_while_import_schemas_exist(destination_name: str) -> No
     assert "labels" in schema.tables
     assert "annotations" in schema.tables
     # check if attached to import schema
-    assert schema._imported_version_hash == IMPORTED_VERSION_HASH_ETH_V5
+    assert schema._imported_version_hash == IMPORTED_VERSION_HASH_ETH_V6
     # extract some data with restored pipeline
     p.run(["C", "D", "E"], table_name="blacklist")
     assert "labels" in schema.tables

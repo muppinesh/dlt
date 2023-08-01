@@ -13,7 +13,9 @@ from dlt.common.configuration.specs import RunConfiguration, CredentialsConfigur
 from dlt.common.configuration.container import Container
 from dlt.common.configuration.exceptions import ConfigFieldMissingException, ContextDefaultCannotBeCreated
 from dlt.common.configuration.specs.config_section_context import ConfigSectionContext
-from dlt.common.exceptions import DestinationLoadingViaStagingNotSupported, DestinationNoStagingMode, MissingDependencyException, DestinationIncompatibleLoaderFileFormatException
+from dlt.common.configuration.resolve import initialize_credentials
+from dlt.common.exceptions import (DestinationLoadingViaStagingNotSupported, DestinationNoStagingMode, MissingDependencyException,
+                                   DestinationIncompatibleLoaderFileFormatException)
 from dlt.common.normalizers import default_normalizers, import_normalizers
 from dlt.common.runtime import signals, initialize_runtime
 from dlt.common.schema.exceptions import InvalidDatasetName
@@ -351,7 +353,9 @@ class Pipeline(SupportsPipeline):
         staging_client = None
         if self.staging:
             staging_client = self._get_staging_client(self.default_schema)
-            # inject staging config into destination config, TODO: Not super clean I think?
+            # inject staging config into destination config,
+            # TODO: Not super clean I think? - DestinationClientDwhConfiguration must be refactored
+            # staging_credentials, dataset name and default schema name are arguments for the loader not parts of configuration
             if isinstance(client.config, DestinationClientDwhConfiguration) and not client.config.staging_credentials:
                 client.config.staging_credentials = staging_client.config.credentials
 
@@ -361,7 +365,15 @@ class Pipeline(SupportsPipeline):
             raise_on_failed_jobs=raise_on_failed_jobs,
             _load_storage_config=self._load_storage_config
         )
-        load = Load(self.destination, staging=self.staging, collector=self.collector, is_storage_owner=False, config=load_config, initial_client_config=client.config, initial_staging_client_config=staging_client.config if staging_client else None)
+        load = Load(
+            self.destination,
+            staging_destination=self.staging,
+            collector=self.collector,
+            is_storage_owner=False,
+            config=load_config,
+            initial_client_config=client.config,
+            initial_staging_client_config=staging_client.config if staging_client else None
+        )
         try:
             with signals.delayed_signals():
                 runner.run_pool(load.config, load)
@@ -858,7 +870,7 @@ class Pipeline(SupportsPipeline):
 
         # get the current schema and merge tables from source_schema
         # note we are not merging props like max nesting or column propagation
-        for table in source_schema.data_tables():
+        for table in source_schema.data_tables(include_incomplete=True):
             pipeline_schema.update_schema(pipeline_schema.normalize_table_identifiers(table))
 
         return extract_id
@@ -875,10 +887,15 @@ class Pipeline(SupportsPipeline):
         # create initial destination client config
         client_spec = destination.spec()
         # initialize explicit credentials
-        credentials = credentials or self.credentials
+        if not as_staging:
+            # explicit credentials passed to dlt.pipeline should not be applied to staging
+            credentials = credentials or self.credentials
         if credentials is not None and not isinstance(credentials, CredentialsConfiguration):
             # use passed credentials as initial value. initial value may resolve credentials
-            credentials = client_spec.get_resolvable_fields()["credentials"](credentials)
+            credentials = initialize_credentials(
+                client_spec.get_resolvable_fields()["credentials"],
+                credentials
+            )
         # this client support schemas and datasets
         default_schema_name = None if self.config.use_single_dataset else self.default_schema_name
 
@@ -1142,8 +1159,9 @@ class Pipeline(SupportsPipeline):
                         with contextlib.suppress(FileNotFoundError):
                             self._schema_storage.load_schema(schema_name)
                     else:
-                        logger.info(f"The schema {schema_name} was restored from the destination {self.destination.__name__}:{job_client.sql_client.dataset_name}")
-                        restored_schemas.append(Schema.from_dict(json.loads(schema_info.schema)))
+                        schema = Schema.from_dict(json.loads(schema_info.schema))
+                        logger.info(f"The schema {schema_name} version {schema.version} hash {schema.stored_version_hash} was restored from the destination {self.destination.__name__}:{job_client.sql_client.dataset_name}")
+                        restored_schemas.append(schema)
         return restored_schemas
 
     @contextmanager

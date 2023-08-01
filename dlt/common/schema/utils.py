@@ -168,7 +168,13 @@ def compile_simple_regexes(r: Iterable[TSimpleRegex]) -> REPattern:
 
 def validate_stored_schema(stored_schema: TStoredSchema) -> None:
     # use lambda to verify only non extra fields
-    validate_dict(TStoredSchema, stored_schema, ".", lambda k: not k.startswith("x-"), simple_regex_validator)
+    validate_dict(
+        TStoredSchema,
+        stored_schema,
+        ".",
+        lambda k: not k.startswith("x-"),
+        simple_regex_validator
+    )
     # check child parent relationships
     for table_name, table in stored_schema["tables"].items():
         parent_table_name = table.get("parent")
@@ -258,6 +264,11 @@ def migrate_schema(schema_dict: DictStrAny, from_engine: int, to_engine: int) ->
         schema_dict["tables"][VERSION_TABLE_NAME] = version_table()
         schema_dict["tables"][LOADS_TABLE_NAME] = load_table()
         from_engine = 5
+    if from_engine == 5 and to_engine > 5:
+        # replace loads table
+        schema_dict["tables"][LOADS_TABLE_NAME] = load_table()
+        from_engine = 6
+
 
     schema_dict["engine_version"] = from_engine
     if from_engine != to_engine:
@@ -387,10 +398,10 @@ def hint_to_column_prop(h: TColumnHint) -> TColumnProp:
     return h
 
 
-def get_columns_names_with_prop(table: TTableSchema, column_prop: TColumnProp, only_completed: bool = False) -> List[str]:
+def get_columns_names_with_prop(table: TTableSchema, column_prop: TColumnProp, include_incomplete: bool = False) -> List[str]:
     # column_prop: TColumnProp = hint_to_column_prop(hint_type)
     # default = column_prop != "nullable"  # default is true, only for nullable false
-    return [c["name"] for c in table["columns"].values() if c.get(column_prop, False) is True and (not only_completed or is_complete_column(c))]
+    return [c["name"] for c in table["columns"].values() if bool(c.get(column_prop, False)) is True and (include_incomplete or is_complete_column(c))]
 
 
 def merge_schema_updates(schema_updates: Sequence[TSchemaUpdate]) -> TSchemaTables:
@@ -420,7 +431,7 @@ def get_write_disposition(tables: TSchemaTables, table_name: str) -> TWriteDispo
 
 def table_schema_has_type(table: TTableSchema, _typ: TDataType) -> bool:
     """Checks if `table` schema contains column with type _typ"""
-    return any(c["data_type"] == _typ for c in table["columns"].values())
+    return any(c.get("data_type") == _typ for c in table["columns"].values())
 
 
 def get_top_level_table(tables: TSchemaTables, table_name: str) -> TTableSchema:
@@ -461,6 +472,8 @@ def group_tables_by_resource(tables: TSchemaTables, pattern: Optional[REPattern]
 
 
 def version_table() -> TTableSchema:
+    # NOTE: always add new columns at the end of the table so we have identical layout
+    # after an update of existing tables (always at the end)
     table = new_table(VERSION_TABLE_NAME, columns=[
             add_missing_hints({
                 "name": "version",
@@ -500,6 +513,8 @@ def version_table() -> TTableSchema:
 
 
 def load_table() -> TTableSchema:
+    # NOTE: always add new columns at the end of the table so we have identical layout
+    # after an update of existing tables (always at the end)
     table = new_table(LOADS_TABLE_NAME, columns=[
             add_missing_hints({
                 "name": "load_id",
@@ -520,7 +535,12 @@ def load_table() -> TTableSchema:
                 "name": "inserted_at",
                 "data_type": "timestamp",
                 "nullable": False
-            })
+            }),
+            add_missing_hints({
+                "name": "schema_version_hash",
+                "data_type": "text",
+                "nullable": True,
+            }),
         ]
     )
     table["write_disposition"] = "skip"
